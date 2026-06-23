@@ -14,7 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Plus, Trash2, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { toast } from "sonner";
@@ -85,7 +85,9 @@ export default function Transactions() {
               <Button className="gap-2" data-testid="add-transaction-btn"><Plus className="h-4 w-4" /> Add</Button>
             </DialogTrigger>
             <DialogContent>
-              <DialogHeader><DialogTitle>Add transaction</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>Add transaction</DialogTitle>
+                <DialogDescription>Record a manual income or expense entry.</DialogDescription>
+              </DialogHeader>
               <form onSubmit={submit} className="space-y-4" data-testid="add-transaction-form">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
