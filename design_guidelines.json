@@ -1,0 +1,102 @@
+{
+  "theme": "Light",
+  "archetype": "Archetype 1 (Organic & Earthy)",
+  "domain": "Finance, Banking, SaaS Dashboard",
+  "typography": {
+    "fonts": {
+      "heading": "Manrope",
+      "body": "IBM Plex Sans"
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl tracking-tight font-light",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-medium",
+      "h3": "text-xl sm:text-2xl font-medium",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-sm md:text-base leading-relaxed",
+      "overline": "text-xs uppercase tracking-[0.2em] font-semibold"
+    },
+    "rules": "Avoid generic sans (Inter). Do not center-align by default. Line height tight for headers, loose for body."
+  },
+  "colors": {
+    "background": "#F7F7F5",
+    "surface": "#FFFFFF",
+    "text": {
+      "primary": "#1A1A1A",
+      "secondary": "#5C5C59",
+      "muted": "#8A8A86"
+    },
+    "brand": {
+      "primary": "#4A6B53",
+      "primary_hover": "#3B5642",
+      "accent": "#7A9E9F"
+    },
+    "state": {
+      "success": "#4A6B53",
+      "warning": "#C07A65",
+      "error": "#B0413E",
+      "info": "#7A9E9F"
+    },
+    "border": "#E5E5E3",
+    "rules": "Never use pure black or pure gray; tint grays warmly. Ensure minimum 4.5:1 contrast ratio. Primary color used sparingly for key CTAs."
+  },
+  "layout": {
+    "strategy": "MODE B: THE 'CONTROL ROOM' GRID",
+    "base_grid": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4",
+    "gap": "gap-4 md:gap-6",
+    "spacing": "Generous internal padding (p-6, p-8) for containers. Optical alignment over mathematical.",
+    "rules": "Every pixel utilized. Use h-full on children for even heights. Grid items must be direct children. Limit image heights to 80vh on mobile."
+  },
+  "components": {
+    "cards": {
+      "style": "Flat solid surfaces. 1px subtle border (border-border). No default shadow.",
+      "hover": "Slight lift (-translate-y-1), soft shadow (shadow-sm), border darkens slightly.",
+      "radius": "rounded-lg"
+    },
+    "ai_insights_panel": {
+      "style": "Neumorphic or gently tinted (bg-brand-accent/10) to distinguish from purely financial data.",
+      "border": "1px solid brand-accent/30"
+    },
+    "navigation": {
+      "style": "Visible nav bar on desktop. Glassmorphism only if sticky (backdrop-blur-xl bg-white/70 with 1px border-white/40). Otherwise solid.",
+      "links": "Hover state must explicitly set text color."
+    },
+    "forms": {
+      "style": "Shadcn UI heavily customized. Avoid native inputs. Dense and compact for data entry."
+    }
+  },
+  "motion": {
+    "hover": "transition-transform duration-200 ease-out",
+    "interactions": "Micro-interactions for feedback. Explicit hover colors.",
+    "rules": "Respect prefers-reduced-motion. Add aria-hidden='true' to purely decorative animations."
+  },
+  "icons": {
+    "library": "lucide-react",
+    "rules": "Solid/outline based on visual weight. Don't over-saturate UI with icons."
+  },
+  "media": {
+    "image_urls": {
+      "avatar": {
+        "url": "https://images.pexels.com/photos/20157010/pexels-photo-20157010.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Professional avatar portrait for user profile"
+      },
+      "chart_bg": {
+        "url": "https://images.pexels.com/photos/7567223/pexels-photo-7567223.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Abstract financial chart background (optional decoration)"
+      }
+    },
+    "rules": "No placeholder URLs. Max 80vh on mobile."
+  },
+  "testing": {
+    "rules": "All interactive and key informational elements MUST include a data-testid attribute in kebab-case, role-based."
+  },
+  "instructions_to_main_agent": [
+    "Build a 'Control Room' grid dashboard layout for financial management.",
+    "Use pure HTML + Tailwind for structural layouts, and Shadcn UI (customized) for interactive elements.",
+    "Implement Shadcn charts or Recharts for financial data (revenue, expenses, cash flow).",
+    "Include a dedicated AI Insights panel to surface tasks, anomalies, and suggestions. Style this panel distinctly.",
+    "Ensure the layout accommodates file uploads (Excel/CSV) and a connection UI for Google Drive.",
+    "Do NOT use Inter, Roboto, or standard fonts for headings. Follow the typography rules rigidly.",
+    "Include data-testid on every interactive element (buttons, forms, links) and important data points.",
+    "Implement a light theme based on the Archetype 1 (Organic & Earthy) color palette provided."
+  ]
+}
