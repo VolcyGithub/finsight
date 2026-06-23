@@ -1,0 +1,47 @@
+{
+  "summary": "Full e2e testing of FinSight: 17/17 backend pytest cases pass (auth, sample-data, transactions CRUD, upload CSV, dashboard summary, Gemini AI analyze, alerts, encryption-at-rest, clear-data). Frontend UI verified end-to-end: admin login -> Dashboard renders 4 KPI cards + 3 charts (cashflow area, expense pie, monthly net bar) with 459 sample txns; Transactions page lists 459 rows, income filter -> 85 rows, Add Transaction dialog creates a txn that appears in the list; Upload page shows working dropzone, sample data button works, Google Drive button is correctly disabled; AI Insights renders insights/suggestions/anomaly alerts and supports re-analyze; Alerts page shows alerts list; Settings shows profile, privacy card, and clear-data flow.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "CORS middleware", "issue": "CORSMiddleware is added AFTER routes are included; FastAPI still applies it, but order is unusual. Also allow_origins only includes FRONTEND_URL and localhost while CORS_ORIGINS env var is unused."},
+      {"endpoint": "POST /api/auth/login", "issue": "Failed-attempt lockout sets locked_until on EVERY failed attempt (even attempt #1), effectively locking immediately for LOCKOUT_MIN as soon as count crosses 5. Logic still works but the locked_until reset on every failure is misleading."},
+      {"endpoint": "set_auth_cookies", "issue": "secure=False on cookies even though the deployed site is HTTPS. For production use Secure=True (drive by ENV)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Add Transaction dialog & others", "issues": ["Radix Dialog console warning: 'Missing Description or aria-describedby={undefined} for DialogContent'. Add <DialogDescription> or aria-describedby for accessibility."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Add DialogDescription / aria-describedby to DialogContent in Transactions.jsx (and any other dialogs) to silence Radix accessibility warning.",
+    "(Optional) Tighten login lockout logic: only set locked_until when count crosses MAX_FAILED instead of on every failed attempt.",
+    "(Optional) Drive cookie Secure flag from env so production uses Secure=True over HTTPS.",
+    "(Optional) Either use CORS_ORIGINS env var or remove it; currently it is read into backend/.env but never used by server.py."
+  ],
+  "critical_code_review_comments": [
+    "server.py is ~545 lines and mixes auth, parsing, transactions, AI, sample data and CORS. Consider splitting into modules (routers/auth.py, routers/transactions.py, routers/ai.py) once features grow.",
+    "CORSMiddleware is registered after include_router; conventionally middleware is registered before routes for clarity.",
+    "Cookies are set with secure=False which is fine locally but should be True in HTTPS production.",
+    "Encryption verified end-to-end: amount_enc / description_enc stored in Mongo, plaintext not present, decrypt on read works.",
+    "AI analyze endpoint is correct but synchronous and can take 10-40s; consider returning a job id with polling for better UX on slow networks.",
+    "No rate limit on /api/ai/analyze; a logged-in user could spam it. Consider per-user throttle."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/__init__.py"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% on tested flows"},
+  "test_credentials": "admin@finsight.com / admin123 (works). New user via /api/auth/register also works.",
+  "seed_data_creation": "Used POST /api/sample-data for admin user (458-459 transactions including an injected anomaly). Cleaned and re-created during TestSampleAndDashboard.test_load_sample_data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests live at /app/backend/tests/backend_test.py and cover auth (incl. httpOnly cookie check), sample-data, transactions CRUD, CSV upload, dashboard summary, AI analyze (Gemini 3.1 Pro) + alerts, encryption-at-rest verification, and data clear. Run with: pytest /app/backend/tests/backend_test.py -v. Frontend dashboard route is '/' (not '/dashboard'); login redirects to '/'. Net Profit KPI testid is 'kpi-profit' (not 'kpi-net'). Charts: cashflow-chart, category-chart, net-chart. AI analyze may take 10-40s.",
+  "rca of the issue": "No blocking issues found. The original /test_register_new_user failure was a test-side bug (email comparison didn't lowercase). Backend lowercases email on register and login (intentional), so comparing user-supplied 'TEST_user_...' to stored 'test_user_...' must be case-insensitive; fix applied in test."
+}
