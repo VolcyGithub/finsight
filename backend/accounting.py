@@ -567,7 +567,7 @@ def register_accounting_routes(api, db, get_current_user):
         try:
             result = await send_invoice_email(to_email, f"Invoice {invoice['number']} from FinSight", html, pdf, f"{invoice['number']}.pdf")
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Email failed: {e}")
+            raise HTTPException(status_code=422, detail=f"Email provider rejected the request: {e}")
         await db.invoices.update_one({"id": invoice_id, "user_id": uid},
                                      {"$set": {"emailed": True, "emailed_at": now_iso()}})
         return {"ok": True, "to": to_email, "email_id": result.get("id") if isinstance(result, dict) else None}

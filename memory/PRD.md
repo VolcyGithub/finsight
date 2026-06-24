@@ -18,6 +18,12 @@ A business finances management app with integrated encrypted local-style storage
 ## User Personas
 - SMB owner/operator who keeps books in spreadsheets and wants quick, private financial intelligence.
 
+## Implemented (2026-06-24) — Reconciliation + AI Categorization + Invoice PDF/Email
+- **Bank reconciliation**: `/api/reconciliation/*` — list unreconciled bank txns with AI/category-based suggested account, post to double-entry ledger (single + bulk), summary. Reports stay balanced. Frontend `/reconcile` page with per-row account select + "Post all suggested".
+- **AI auto-categorization on sync**: new Plaid transactions are categorized by Gemini in a background task (sets category + ai_categorized, flags anomalies as alerts). Verified live (16 categorized, 3 alerts). Fixed asyncio task GC bug via strong references.
+- **Invoice PDF + Email**: reportlab PDF (`/api/invoices/{id}/pdf`), Resend email with PDF attachment + Stripe pay link (`/api/invoices/{id}/email`). Frontend PDF/Email buttons per invoice.
+- Verified: 11/11 new + 29/29 regression tests; live AI categorization + email confirmed.
+
 ## Implemented (2026-06-24) — Plaid Auto-Sync
 - Link tokens now register a webhook URL (`/api/plaid/webhook`). On `SYNC_UPDATES_AVAILABLE` (and INITIAL/HISTORICAL/DEFAULT_UPDATE), the item is synced automatically — no manual "Sync now".
 - Background fallback scheduler syncs all linked items every 30 min (`start_plaid_autosync`).

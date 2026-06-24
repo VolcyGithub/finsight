@@ -24,6 +24,16 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_bg_tasks = set()
+
+
+def _spawn(coro):
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+    return task
+
+
 def _webhook_url() -> str:
     base = os.environ.get("FRONTEND_URL", "").rstrip("/")
     return f"{base}/api/plaid/webhook" if base else None
@@ -119,7 +129,7 @@ async def sync_item(db, uid: str, item_id: str) -> int:
         {"$set": {"cursor": cursor, "last_synced": now_iso()}},
     )
     if new_items:
-        asyncio.create_task(_categorize_and_flag(db, uid, new_items[:40]))
+        _spawn(_categorize_and_flag(db, uid, new_items[:40]))
     return count
 
 
