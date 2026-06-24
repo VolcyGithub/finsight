@@ -21,20 +21,21 @@ A business finances management app with integrated encrypted local-style storage
 ## Implemented (2026-06-23)
 - JWT auth (login/register/logout/me) + admin seeding + brute-force lockout.
 - CSV/Excel upload with flexible column detection -> encrypted transactions.
+- **Google Drive OAuth import** (read-only): connect/disconnect, list spreadsheets, import Sheets/xlsx/csv. Tokens stored Fernet-encrypted.
 - Sample data generator (6 months, includes injected anomaly).
 - Dashboard: KPIs + cash flow area chart, expense pie, monthly net bar.
 - Transactions: list, type filter, add (dialog), delete.
 - AI Insights: Gemini 3.1 Pro generates insights, suggestions, anomaly alerts.
 - Alerts center (dismiss/read). Settings (profile, privacy, clear-data).
-- Verified: 17/17 backend tests + frontend e2e at 100%.
+- Verified: 17/17 backend tests + frontend e2e at 100%. Drive endpoints verified server-side (full OAuth round-trip needs live Google auth by user).
 
 ## Backlog / Remaining
-- P0: Google Drive OAuth import (connect + pick sheets).
 - P1: Per-user throttle on /api/ai/analyze; async job + polling for long analyses.
 - P1: Secure cookie flag driven by env for production HTTPS.
+- P1: Google Sheets export currently imports first tab only; support multi-tab selection.
 - P2: Budgets & forecasting; recurring transaction detection; export reports (PDF).
 - P2: Multi-currency; team/multi-user accounts.
 
 ## Next Tasks
-1. Google Drive integration (OAuth + sheet import).
+1. Cash-flow forecasting + recurring-expense detection.
 2. Production hardening (secure cookies via env, AI rate limit).

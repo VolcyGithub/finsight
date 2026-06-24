@@ -5,6 +5,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 import os
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 import io
 import uuid
 import logging
@@ -13,10 +14,17 @@ from typing import Optional, List
 
 import pandas as pd
 from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, UploadFile, File
+from fastapi.responses import RedirectResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
 from bson import ObjectId
+
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request as GoogleRequest
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
 from security import (
     encrypt_value,
@@ -61,6 +69,12 @@ class TransactionInput(BaseModel):
     category: str = "Uncategorized"
     type: str = "expense"  # income | expense
     amount: float
+
+
+class DriveImportInput(BaseModel):
+    file_id: str
+    name: str
+    mimeType: str
 
 
 def now_iso() -> str:
@@ -506,6 +520,152 @@ async def clear_data(user: dict = Depends(get_current_user)):
 @api.get("/")
 async def root():
     return {"message": "FinSight API", "status": "ok"}
+
+
+# ----------------------------- Google Drive -----------------------------
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+DRIVE_MIME_QUERY = (
+    "(mimeType='application/vnd.google-apps.spreadsheet' "
+    "or mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' "
+    "or mimeType='application/vnd.ms-excel' "
+    "or mimeType='text/csv') and trashed=false"
+)
+
+
+def _drive_client_config():
+    return {
+        "web": {
+            "client_id": os.environ["GOOGLE_CLIENT_ID"],
+            "client_secret": os.environ["GOOGLE_CLIENT_SECRET"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [os.environ["GOOGLE_DRIVE_REDIRECT_URI"]],
+        }
+    }
+
+
+async def _get_drive_service(user_id: str):
+    doc = await db.drive_credentials.find_one({"user_id": user_id})
+    if not doc:
+        raise HTTPException(status_code=400, detail="Google Drive not connected. Connect your Drive first.")
+    creds = Credentials(
+        token=decrypt_value(doc["access_token"]),
+        refresh_token=decrypt_value(doc.get("refresh_token", "")) or None,
+        token_uri=doc["token_uri"],
+        client_id=os.environ["GOOGLE_CLIENT_ID"],
+        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+        scopes=doc.get("scopes"),
+    )
+    if creds.expired and creds.refresh_token:
+        creds.refresh(GoogleRequest())
+        await db.drive_credentials.update_one(
+            {"user_id": user_id},
+            {"$set": {"access_token": encrypt_value(creds.token),
+                      "expiry": creds.expiry.isoformat() if creds.expiry else None,
+                      "updated_at": now_iso()}},
+        )
+    return build("drive", "v3", credentials=creds)
+
+
+@api.get("/drive/connect")
+async def drive_connect(user: dict = Depends(get_current_user)):
+    redirect_uri = os.environ["GOOGLE_DRIVE_REDIRECT_URI"]
+    flow = Flow.from_client_config(_drive_client_config(), scopes=DRIVE_SCOPES, redirect_uri=redirect_uri)
+    auth_url, _ = flow.authorization_url(
+        access_type="offline", include_granted_scopes="true", prompt="consent", state=str(user["_id"])
+    )
+    return {"authorization_url": auth_url}
+
+
+@api.get("/oauth/drive/callback")
+async def drive_callback(code: str, state: str):
+    redirect_uri = os.environ["GOOGLE_DRIVE_REDIRECT_URI"]
+    frontend = os.environ.get("FRONTEND_URL", "")
+    try:
+        flow = Flow.from_client_config(_drive_client_config(), scopes=None, redirect_uri=redirect_uri)
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        await db.drive_credentials.update_one(
+            {"user_id": state},
+            {"$set": {
+                "user_id": state,
+                "access_token": encrypt_value(creds.token),
+                "refresh_token": encrypt_value(creds.refresh_token or ""),
+                "token_uri": creds.token_uri,
+                "scopes": creds.scopes,
+                "expiry": creds.expiry.isoformat() if creds.expiry else None,
+                "updated_at": now_iso(),
+            }},
+            upsert=True,
+        )
+        return RedirectResponse(url=f"{frontend}/upload?drive_connected=true")
+    except Exception as e:
+        logger.error(f"Drive OAuth callback failed: {e}")
+        return RedirectResponse(url=f"{frontend}/upload?drive_error=1")
+
+
+@api.get("/drive/status")
+async def drive_status(user: dict = Depends(get_current_user)):
+    doc = await db.drive_credentials.find_one({"user_id": str(user["_id"])})
+    return {"connected": bool(doc)}
+
+
+@api.get("/drive/files")
+async def drive_files(user: dict = Depends(get_current_user)):
+    service = await _get_drive_service(str(user["_id"]))
+    try:
+        results = service.files().list(
+            q=DRIVE_MIME_QUERY, pageSize=50,
+            fields="files(id,name,mimeType,modifiedTime)", orderBy="modifiedTime desc",
+        ).execute()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not list Drive files: {e}")
+    return {"files": results.get("files", [])}
+
+
+@api.post("/drive/import")
+async def drive_import(body: DriveImportInput, user: dict = Depends(get_current_user)):
+    uid = str(user["_id"])
+    service = await _get_drive_service(uid)
+    buf = io.BytesIO()
+    is_csv = False
+    try:
+        if body.mimeType == "application/vnd.google-apps.spreadsheet":
+            request = service.files().export_media(fileId=body.file_id, mimeType="text/csv")
+            is_csv = True
+        else:
+            request = service.files().get_media(fileId=body.file_id)
+            is_csv = body.mimeType in ("text/csv", "application/vnd.ms-excel") or body.name.lower().endswith(".csv")
+        downloader = MediaIoBaseDownload(buf, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not download from Drive: {e}")
+
+    buf.seek(0)
+    try:
+        df = pd.read_csv(buf) if is_csv else pd.read_excel(buf)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read file: {e}")
+
+    rows = parse_dataframe(df)
+    if not rows:
+        raise HTTPException(status_code=400, detail="No valid transactions found. Ensure the sheet has date, description and amount columns.")
+
+    worksheet_id = str(uuid.uuid4())
+    await db.worksheets.insert_one({
+        "id": worksheet_id, "user_id": uid, "filename": body.name,
+        "source": "google_drive", "row_count": len(rows), "created_at": now_iso(),
+    })
+    count = await store_transactions(uid, worksheet_id, rows)
+    return {"imported": count, "filename": body.name}
+
+
+@api.post("/drive/disconnect")
+async def drive_disconnect(user: dict = Depends(get_current_user)):
+    await db.drive_credentials.delete_one({"user_id": str(user["_id"])})
+    return {"ok": True}
 
 
 app.include_router(api)

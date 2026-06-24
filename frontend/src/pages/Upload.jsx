@@ -1,12 +1,16 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
+import {
   UploadCloud, FileSpreadsheet, HardDriveDownload, Sparkles, Loader2, CheckCircle2, Lock,
+  FileSpreadsheet as SheetIcon, Download, Unplug,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -82,17 +86,7 @@ export default function Upload() {
           </div>
         </Card>
 
-        <Card className="p-8" data-testid="gdrive-card">
-          <div className="flex flex-col items-center text-center py-6">
-            <div className="h-14 w-14 rounded-full bg-accent/15 flex items-center justify-center mb-4">
-              <HardDriveDownload className="h-6 w-6 text-accent" />
-            </div>
-            <h3 className="font-heading text-lg font-medium">Connect Google Drive</h3>
-            <p className="text-sm text-muted-foreground mt-1 mb-5">Pull sheets directly from your Drive folders.</p>
-            <Button variant="outline" disabled data-testid="connect-gdrive-btn">Connect Drive</Button>
-            <Badge variant="secondary" className="mt-3 font-normal">Coming soon</Badge>
-          </div>
-        </Card>
+        <DriveSection />
       </div>
 
       <Card className="p-6 mt-6 bg-accent/5 border-accent/30" data-testid="sample-data-card">
@@ -134,5 +128,146 @@ export default function Upload() {
         )}
       </div>
     </div>
+  );
+}
+
+function DriveSection() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const [filesOpen, setFilesOpen] = useState(false);
+
+  const { data: status, isLoading } = useQuery({
+    queryKey: ["drive-status"],
+    queryFn: async () => (await api.get("/drive/status")).data,
+  });
+  const connected = status?.connected;
+
+  useEffect(() => {
+    if (params.get("drive_connected")) {
+      toast.success("Google Drive connected");
+      qc.invalidateQueries({ queryKey: ["drive-status"] });
+      params.delete("drive_connected");
+      setParams(params, { replace: true });
+    } else if (params.get("drive_error")) {
+      toast.error("Could not connect Google Drive. Please try again.");
+      params.delete("drive_error");
+      setParams(params, { replace: true });
+    }
+  }, []); // eslint-disable-line
+
+  const connectMut = useMutation({
+    mutationFn: async () => (await api.get("/drive/connect")).data,
+    onSuccess: (d) => { window.location.href = d.authorization_url; },
+    onError: (e) => toast.error(formatApiErrorDetail(e.response?.data?.detail)),
+  });
+
+  const disconnectMut = useMutation({
+    mutationFn: async () => (await api.post("/drive/disconnect")).data,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["drive-status"] }); toast.success("Drive disconnected"); },
+  });
+
+  return (
+    <Card className="p-8" data-testid="gdrive-card">
+      <div className="flex flex-col items-center text-center py-6">
+        <div className="h-14 w-14 rounded-full bg-accent/15 flex items-center justify-center mb-4">
+          <HardDriveDownload className="h-6 w-6 text-accent" />
+        </div>
+        <h3 className="font-heading text-lg font-medium">Google Drive</h3>
+        {isLoading ? (
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mt-4" />
+        ) : connected ? (
+          <>
+            <p className="text-sm text-muted-foreground mt-1 mb-5">Connected — import sheets straight from your Drive.</p>
+            <div className="flex items-center gap-2">
+              <Button onClick={() => setFilesOpen(true)} className="gap-2" data-testid="browse-drive-btn">
+                <SheetIcon className="h-4 w-4" /> Browse files
+              </Button>
+              <Button variant="outline" onClick={() => disconnectMut.mutate()} disabled={disconnectMut.isPending} className="gap-2" data-testid="disconnect-drive-btn">
+                <Unplug className="h-4 w-4" /> Disconnect
+              </Button>
+            </div>
+            <Badge variant="secondary" className="mt-3 font-normal flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3 text-primary" /> Connected
+            </Badge>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground mt-1 mb-5">Pull spreadsheets directly from your Drive folders.</p>
+            <Button onClick={() => connectMut.mutate()} disabled={connectMut.isPending} className="gap-2" data-testid="connect-gdrive-btn">
+              {connectMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Connect Drive
+            </Button>
+          </>
+        )}
+      </div>
+
+      <DriveFilesDialog open={filesOpen} onOpenChange={setFilesOpen} onImported={() => {
+        qc.invalidateQueries();
+        setFilesOpen(false);
+        navigate("/");
+      }} />
+    </Card>
+  );
+}
+
+function DriveFilesDialog({ open, onOpenChange, onImported }) {
+  const [importingId, setImportingId] = useState(null);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["drive-files"],
+    queryFn: async () => (await api.get("/drive/files")).data,
+    enabled: open,
+  });
+
+  const importFile = async (f) => {
+    setImportingId(f.id);
+    try {
+      const res = await api.post("/drive/import", { file_id: f.id, name: f.name, mimeType: f.mimeType });
+      toast.success(`Imported ${res.data.imported} transactions from ${f.name}`);
+      onImported();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail));
+    } finally {
+      setImportingId(null);
+    }
+  };
+
+  const files = data?.files || [];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Import from Google Drive</DialogTitle>
+          <DialogDescription>Select a spreadsheet to import as transactions.</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-96 overflow-y-auto -mx-1 px-1" data-testid="drive-files-list">
+          {isLoading ? (
+            <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+          ) : error ? (
+            <p className="text-sm text-destructive py-6 text-center">Could not load files. Try reconnecting Drive.</p>
+          ) : files.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">No spreadsheets found in your Drive.</p>
+          ) : (
+            <div className="space-y-2">
+              {files.map((f) => (
+                <div key={f.id} className="flex items-center justify-between gap-3 p-3 rounded-md border border-border hover:bg-secondary/60 transition-colors" data-testid={`drive-file-${f.id}`}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <FileSpreadsheet className="h-4 w-4 text-primary shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{f.name}</p>
+                      <p className="text-xs text-muted-foreground">{(f.modifiedTime || "").slice(0, 10)}</p>
+                    </div>
+                  </div>
+                  <Button size="sm" variant="secondary" className="gap-1.5 shrink-0" disabled={importingId === f.id}
+                    onClick={() => importFile(f)} data-testid={`import-drive-file-${f.id}`}>
+                    {importingId === f.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Import
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
