@@ -16,7 +16,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { Plus, Trash2, ArrowUpRight, ArrowDownRight, Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Transactions() {
@@ -62,6 +62,18 @@ export default function Transactions() {
     addMut.mutate({ ...form, amount: parseFloat(form.amount) });
   };
 
+  const classifyMut = useMutation({
+    mutationFn: async () => (await api.post("/transactions/classify", { only_uncategorized: true })).data,
+    onSuccess: (d) => {
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["summary"] });
+      qc.invalidateQueries({ queryKey: ["alerts"] });
+      if (d.classified === 0) toast.success("All transactions are already AI-classified");
+      else toast.success(`AI classified ${d.classified}${d.anomalies ? `, flagged ${d.anomalies}` : ""}${d.remaining ? ` · ${d.remaining} left — run again` : ""}`);
+    },
+    onError: (e) => toast.error(formatApiErrorDetail(e.response?.data?.detail)),
+  });
+
   const txns = data?.transactions || [];
 
   return (
@@ -72,6 +84,9 @@ export default function Transactions() {
           <h1 className="font-heading text-3xl sm:text-4xl font-light tracking-tight">Transactions</h1>
         </div>
         <div className="flex items-center gap-3">
+          <Button variant="outline" className="gap-2" onClick={() => classifyMut.mutate()} disabled={classifyMut.isPending} data-testid="classify-ai-btn">
+            {classifyMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} Classify with AI
+          </Button>
           <Select value={typeFilter} onValueChange={setTypeFilter}>
             <SelectTrigger className="w-36" data-testid="type-filter"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -152,7 +167,16 @@ export default function Transactions() {
                 <TableRow key={t.id} data-testid={`txn-row-${t.id}`}>
                   <TableCell className="text-muted-foreground text-sm whitespace-nowrap">{(t.date || "").slice(0, 10)}</TableCell>
                   <TableCell className="font-medium max-w-xs truncate">{t.description}</TableCell>
-                  <TableCell><Badge variant="secondary" className="font-normal">{t.category}</Badge></TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant="secondary" className="font-normal">{t.category}</Badge>
+                      {t.ai_categorized && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] text-primary" title="Classified by AI" data-testid={`ai-badge-${t.id}`}>
+                          <Sparkles className="h-3 w-3" /> AI
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <span className={`inline-flex items-center gap-1 text-sm ${t.type === "income" ? "text-primary" : "text-destructive"}`}>
                       {t.type === "income" ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}

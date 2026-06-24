@@ -18,6 +18,10 @@ A business finances management app with integrated encrypted local-style storage
 ## User Personas
 - SMB owner/operator who keeps books in spreadsheets and wants quick, private financial intelligence.
 
+## Implemented (2026-06-24) — AI Transaction Classification (all sources)
+- `POST /api/transactions/classify` (Gemini) classifies transactions in batches, updates category + `ai_categorized`, flags anomalies as alerts. Auto-runs in background on CSV/Excel upload, Google Drive import, and Plaid sync.
+- Frontend Transactions page: "Classify with AI" button + AI badge on classified rows. Verified accurate (e.g. "AWS cloud hosting" → Software & Subscriptions, "Uber to client meeting" → Travel).
+
 ## Implemented (2026-06-24) — Reconciliation + AI Categorization + Invoice PDF/Email
 - **Bank reconciliation**: `/api/reconciliation/*` — list unreconciled bank txns with AI/category-based suggested account, post to double-entry ledger (single + bulk), summary. Reports stay balanced. Frontend `/reconcile` page with per-row account select + "Post all suggested".
 - **AI auto-categorization on sync**: new Plaid transactions are categorized by Gemini in a background task (sets category + ai_categorized, flags anomalies as alerts). Verified live (16 categorized, 3 alerts). Fixed asyncio task GC bug via strong references.

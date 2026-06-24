@@ -8,6 +8,7 @@ import os
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 import io
 import uuid
+import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
@@ -35,7 +36,7 @@ from security import (
     create_refresh_token,
     decode_token,
 )
-from ai_service import generate_financial_analysis
+from ai_service import generate_financial_analysis, categorize_transactions
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("finsight")
@@ -69,6 +70,10 @@ class TransactionInput(BaseModel):
     category: str = "Uncategorized"
     type: str = "expense"  # income | expense
     amount: float
+
+
+class ClassifyInput(BaseModel):
+    only_uncategorized: bool = True
 
 
 class DriveImportInput(BaseModel):
@@ -285,7 +290,54 @@ def decrypt_txn(doc: dict) -> dict:
         "category": doc["category"],
         "amount": float(decrypt_value(doc["amount_enc"]) or 0),
         "description": decrypt_value(doc["description_enc"]),
+        "ai_categorized": bool(doc.get("ai_categorized")),
+        "reconciled": bool(doc.get("reconciled")),
     }
+
+
+_bg_tasks = set()
+
+
+def _spawn(coro):
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+    return task
+
+
+async def classify_txns(uid: str, docs: list) -> tuple:
+    """Run AI classification over decrypted transactions; update category + flag anomalies."""
+    items = [{
+        "id": d["id"],
+        "description": decrypt_value(d.get("description_enc", "")),
+        "amount": float(decrypt_value(d.get("amount_enc", "")) or 0),
+        "type": d["type"],
+        "category": d.get("category", ""),
+    } for d in docs]
+    classified, anomalies = 0, 0
+    for i in range(0, len(items), 25):
+        chunk = items[i:i + 25]
+        results = await categorize_transactions(chunk)
+        for r in results:
+            tid = r.get("id")
+            cat = (r.get("category") or "").strip()
+            if tid and cat:
+                await db.transactions.update_one(
+                    {"id": tid, "user_id": uid},
+                    {"$set": {"category": cat[:80], "ai_categorized": True}},
+                )
+                classified += 1
+            if tid and r.get("anomaly"):
+                src = next((c for c in chunk if c["id"] == tid), {})
+                await db.alerts.insert_one({
+                    "id": str(uuid.uuid4()), "user_id": uid,
+                    "title": f"Unusual transaction: {str(src.get('description',''))[:60]}",
+                    "detail": r.get("reason", "Flagged by AI during classification."),
+                    "severity": "medium", "read": False, "created_at": now_iso(),
+                })
+                anomalies += 1
+    return classified, anomalies
+
 
 
 # ----------------------------- Upload / transactions -----------------------------
@@ -321,7 +373,24 @@ async def upload_worksheet(file: UploadFile = File(...), user: dict = Depends(ge
     }
     await db.worksheets.insert_one(ws_doc)
     count = await store_transactions(uid, worksheet_id, rows)
+    new_docs = await db.transactions.find({"user_id": uid, "worksheet_id": worksheet_id}).to_list(40)
+    if new_docs:
+        _spawn(classify_txns(uid, new_docs))
     return {"worksheet_id": worksheet_id, "imported": count, "filename": file.filename}
+
+
+@api.post("/transactions/classify")
+async def classify_transactions_endpoint(body: ClassifyInput, user: dict = Depends(get_current_user)):
+    uid = str(user["_id"])
+    query = {"user_id": uid}
+    if body.only_uncategorized:
+        query["ai_categorized"] = {"$ne": True}
+    docs = await db.transactions.find(query).sort("created_at", -1).to_list(120)
+    if not docs:
+        return {"classified": 0, "anomalies": 0, "remaining": 0}
+    classified, anomalies = await classify_txns(uid, docs)
+    remaining = await db.transactions.count_documents({"user_id": uid, "ai_categorized": {"$ne": True}})
+    return {"classified": classified, "anomalies": anomalies, "remaining": remaining}
 
 
 @api.post("/transactions")
@@ -659,6 +728,9 @@ async def drive_import(body: DriveImportInput, user: dict = Depends(get_current_
         "source": "google_drive", "row_count": len(rows), "created_at": now_iso(),
     })
     count = await store_transactions(uid, worksheet_id, rows)
+    new_docs = await db.transactions.find({"user_id": uid, "worksheet_id": worksheet_id}).to_list(40)
+    if new_docs:
+        _spawn(classify_txns(uid, new_docs))
     return {"imported": count, "filename": body.name}
 
 
