@@ -1,6 +1,7 @@
 """Plaid bank linking + transaction sync into the encrypted transactions store."""
 import os
 import uuid
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, Depends
@@ -75,7 +76,7 @@ def register_plaid_routes(api, db, get_current_user):
                 language="en",
                 user=LinkTokenCreateRequestUser(client_user_id=str(user["_id"])),
             )
-            resp = client.link_token_create(req)
+            resp = await asyncio.to_thread(client.link_token_create, req)
             return {"link_token": resp["link_token"]}
         except plaid.ApiException as e:
             raise HTTPException(status_code=400, detail=f"Plaid error: {e.body}")
@@ -85,8 +86,9 @@ def register_plaid_routes(api, db, get_current_user):
         uid = str(user["_id"])
         client = _plaid_client()
         try:
-            resp = client.item_public_token_exchange(
-                ItemPublicTokenExchangeRequest(public_token=body.public_token)
+            resp = await asyncio.to_thread(
+                client.item_public_token_exchange,
+                ItemPublicTokenExchangeRequest(public_token=body.public_token),
             )
         except plaid.ApiException as e:
             raise HTTPException(status_code=400, detail=f"Plaid error: {e.body}")
@@ -118,7 +120,7 @@ def register_plaid_routes(api, db, get_current_user):
         try:
             while has_more:
                 req = TransactionsSyncRequest(access_token=access_token, cursor=cursor)
-                resp = client.transactions_sync(req)
+                resp = await asyncio.to_thread(client.transactions_sync, req)
                 added.extend(resp["added"])
                 removed.extend(resp["removed"])
                 has_more = resp["has_more"]

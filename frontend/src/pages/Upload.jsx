@@ -305,12 +305,6 @@ function PlaidSection() {
     }
   }, [qc, navigate]);
 
-  const { open, ready } = usePlaidLink({ token: linkToken, onSuccess });
-
-  useEffect(() => {
-    if (linkToken && ready) open();
-  }, [linkToken, ready, open]);
-
   const startConnect = async () => {
     setBusy(true);
     try {
@@ -373,6 +367,13 @@ function PlaidSection() {
           </>
         )}
       </div>
+      {linkToken && <PlaidLauncher token={linkToken} onSuccess={onSuccess} onExit={() => setLinkToken(null)} />}
     </Card>
   );
+}
+
+function PlaidLauncher({ token, onSuccess, onExit }) {
+  const { open, ready } = usePlaidLink({ token, onSuccess, onExit });
+  useEffect(() => { if (ready) open(); }, [ready, open]);
+  return null;
 }

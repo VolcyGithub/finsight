@@ -18,6 +18,11 @@ A business finances management app with integrated encrypted local-style storage
 ## User Personas
 - SMB owner/operator who keeps books in spreadsheets and wants quick, private financial intelligence.
 
+## Implemented (2026-06-24) — Plaid Bank Connection
+- **Connect bank via Plaid** (sandbox): Plaid Link on Import Data page → exchange token → auto-sync transaction history into the encrypted store, feeding dashboard + AI analysis (no manual entry).
+- Endpoints: /api/plaid/create_link_token, /exchange_public_token, /sync, /status, /disconnect/{item_id}. Access tokens Fernet-encrypted; cursor-based incremental sync with dedupe; Plaid amount sign mapped to income/expense.
+- Non-blocking Plaid SDK calls (asyncio.to_thread). Verified: 7/7 Plaid + 29/29 regression tests pass.
+
 ## Implemented (2026-06-24) — QuickBooks-style Accounting (Phase 1)
 - **Double-entry engine**: balanced journal posting (debit==credit enforced), per-user **Chart of Accounts** (17 defaults auto-seeded) + custom accounts.
 - **Customers & Vendors** records.
