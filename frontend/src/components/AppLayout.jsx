@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import {
   LayoutDashboard, Receipt, UploadCloud, Sparkles, BellRing, Settings,
-  LogOut, ShieldCheck, TrendingUp, FileText, Users, BookOpen, BarChart3,
+  LogOut, ShieldCheck, TrendingUp, FileText, Users, BookOpen, BarChart3, Scale,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -11,6 +11,7 @@ const nav = [
   { to: "/invoices", label: "Invoices", icon: FileText, testid: "nav-invoices" },
   { to: "/contacts", label: "Customers & Vendors", icon: Users, testid: "nav-contacts" },
   { to: "/accounting", label: "Accounting", icon: BookOpen, testid: "nav-accounting" },
+  { to: "/reconcile", label: "Reconcile", icon: Scale, testid: "nav-reconcile" },
   { to: "/reports", label: "Reports", icon: BarChart3, testid: "nav-reports" },
   { to: "/transactions", label: "Transactions", icon: Receipt, testid: "nav-transactions" },
   { to: "/upload", label: "Import Data", icon: UploadCloud, testid: "nav-upload" },

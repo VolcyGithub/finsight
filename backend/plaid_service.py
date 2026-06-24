@@ -17,6 +17,7 @@ from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchan
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 
 from security import encrypt_value, decrypt_value
+from ai_service import categorize_transactions
 
 
 def now_iso() -> str:
@@ -91,6 +92,7 @@ async def sync_item(db, uid: str, item_id: str) -> int:
         raise HTTPException(status_code=400, detail=f"Plaid sync error: {e.body}")
 
     count = 0
+    new_items = []
     for t in added:
         row = _map_transaction(t)
         await db.transactions.update_one(
@@ -102,10 +104,12 @@ async def sync_item(db, uid: str, item_id: str) -> int:
                 "amount_enc": encrypt_value(row["amount"]),
                 "description_enc": encrypt_value(row["description"]),
                 "plaid_transaction_id": row["plaid_transaction_id"],
-                "source": "plaid", "created_at": now_iso(),
+                "source": "plaid", "reconciled": False, "created_at": now_iso(),
             }},
             upsert=True,
         )
+        new_items.append({"id": row["plaid_transaction_id"], "description": row["description"],
+                          "amount": row["amount"], "type": row["type"], "category": row["category"]})
         count += 1
     for r in removed:
         await db.transactions.delete_one({"user_id": uid, "plaid_transaction_id": r["transaction_id"]})
@@ -114,7 +118,38 @@ async def sync_item(db, uid: str, item_id: str) -> int:
         {"user_id": uid, "item_id": item_id},
         {"$set": {"cursor": cursor, "last_synced": now_iso()}},
     )
+    if new_items:
+        asyncio.create_task(_categorize_and_flag(db, uid, new_items[:40]))
     return count
+
+
+async def _categorize_and_flag(db, uid: str, items: list):
+    try:
+        results = await categorize_transactions(items)
+    except Exception:
+        return
+    for r in results:
+        ptid = r.get("id")
+        if not ptid:
+            continue
+        category = (r.get("category") or "").strip()
+        update = {}
+        if category:
+            update["category"] = category[:80]
+            update["ai_categorized"] = True
+        if update:
+            await db.transactions.update_one(
+                {"user_id": uid, "plaid_transaction_id": ptid}, {"$set": update}
+            )
+        if r.get("anomaly"):
+            src = next((i for i in items if i["id"] == ptid), {})
+            await db.alerts.insert_one({
+                "id": str(uuid.uuid4()), "user_id": uid,
+                "title": f"Unusual transaction: {src.get('description','')[:60]}",
+                "detail": r.get("reason", "Flagged by AI during auto-categorization."),
+                "severity": "medium", "read": False, "created_at": now_iso(),
+            })
+
 
 
 def register_plaid_routes(api, db, get_current_user):

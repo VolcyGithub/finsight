@@ -16,6 +16,7 @@ import Invoices from "@/pages/Invoices";
 import Contacts from "@/pages/Contacts";
 import Accounting from "@/pages/Accounting";
 import Reports from "@/pages/Reports";
+import Reconciliation from "@/pages/Reconciliation";
 
 const Protected = ({ children }) => (
   <ProtectedRoute>
@@ -35,6 +36,7 @@ function App() {
             <Route path="/contacts" element={<Protected><Contacts /></Protected>} />
             <Route path="/accounting" element={<Protected><Accounting /></Protected>} />
             <Route path="/reports" element={<Protected><Reports /></Protected>} />
+            <Route path="/reconcile" element={<Protected><Reconciliation /></Protected>} />
             <Route path="/transactions" element={<Protected><Transactions /></Protected>} />
             <Route path="/upload" element={<Protected><Upload /></Protected>} />
             <Route path="/insights" element={<Protected><Insights /></Protected>} />

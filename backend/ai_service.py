@@ -60,3 +60,35 @@ async def generate_financial_analysis(summary: dict) -> dict:
     data.setdefault("suggestions", [])
     data.setdefault("alerts", [])
     return data
+
+
+CATEGORIZE_SYSTEM = (
+    "You are a bookkeeping assistant. Assign each bank transaction a concise business accounting "
+    "category (e.g. Payroll, Rent, Software & Subscriptions, Marketing, Utilities, Travel, Office Supplies, "
+    "Cost of Goods Sold, Sales Income, Service Income, Bank Fees, Taxes, Other). Flag a transaction as an "
+    "anomaly only if it is clearly unusual (very large, duplicate-looking, or suspicious). "
+    "Respond ONLY with valid minified JSON."
+)
+
+
+async def categorize_transactions(transactions: list) -> list:
+    """transactions: [{id, description, amount, type, category}]. Returns [{id, category, anomaly, reason}]."""
+    if not transactions:
+        return []
+    api_key = os.environ["EMERGENT_LLM_KEY"]
+    chat = LlmChat(api_key=api_key, session_id="finsight-categorize", system_message=CATEGORIZE_SYSTEM).with_model(
+        MODEL_PROVIDER, MODEL_NAME
+    )
+    schema = (
+        'Return JSON: {"results":[{"id":"string","category":"string","anomaly":true|false,"reason":"string"}]}. '
+        "One entry per input transaction, preserving the id."
+    )
+    prompt = f"Categorize these transactions:\n{json.dumps(transactions, default=str)}\n\n{schema}"
+    try:
+        response = await chat.send_message(UserMessage(text=prompt))
+        raw = response if isinstance(response, str) else str(response)
+        data = _extract_json(raw)
+        return data.get("results", [])
+    except Exception:
+        return []
+

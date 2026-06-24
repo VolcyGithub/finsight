@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import api, { currency, formatApiErrorDetail } from "@/lib/api";
+import api, { currency, formatApiErrorDetail, API } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, FileText, Send, CheckCircle2, CreditCard, Loader2 } from "lucide-react";
+import { Plus, Trash2, FileText, Send, CheckCircle2, CreditCard, Loader2, Download, Mail } from "lucide-react";
 import { toast } from "sonner";
 
 const statusStyle = {
@@ -78,6 +78,11 @@ export default function Invoices() {
     onSuccess: (d) => { window.location.href = d.url; },
     onError: (e) => toast.error(formatApiErrorDetail(e.response?.data?.detail)),
   });
+  const emailMut = useMutation({
+    mutationFn: async (id) => (await api.post(`/invoices/${id}/email`)).data,
+    onSuccess: (d) => { qc.invalidateQueries(); toast.success(`Invoice emailed to ${d.to}`); },
+    onError: (e) => toast.error(formatApiErrorDetail(e.response?.data?.detail)),
+  });
 
   const invoices = data?.invoices || [];
   const customers = contacts?.contacts || [];
@@ -122,6 +127,12 @@ export default function Invoices() {
                   <TableCell><Badge className={`capitalize font-normal ${statusStyle[inv.status]}`}>{inv.status}</Badge></TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1.5">
+                      <Button size="sm" variant="ghost" className="gap-1" onClick={() => window.open(`${API}/invoices/${inv.id}/pdf`, "_blank")} data-testid={`pdf-invoice-${inv.number}`}>
+                        <Download className="h-3.5 w-3.5" /> PDF
+                      </Button>
+                      <Button size="sm" variant="ghost" className="gap-1" disabled={emailMut.isPending} onClick={() => emailMut.mutate(inv.id)} data-testid={`email-invoice-${inv.number}`}>
+                        <Mail className="h-3.5 w-3.5" /> Email
+                      </Button>
                       {inv.status === "draft" && (
                         <Button size="sm" variant="ghost" className="gap-1" onClick={() => sendMut.mutate(inv.id)} data-testid={`send-invoice-${inv.number}`}>
                           <Send className="h-3.5 w-3.5" /> Send
