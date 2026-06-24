@@ -1,0 +1,45 @@
+{
+  "summary": "Full e2e validation of the new QuickBooks-style accounting module on top of FinSight. 12/12 new pytest cases pass (Chart of Accounts seed/CRUD + system-protection, Customers/Vendors CRUD with type filter, balanced/unbalanced Journal posting, Invoice creation with auto-journal AR/Income/Tax, manual mark-paid with payment journal, Stripe checkout URL + payment_transactions record, /payments/status endpoint, P&L/Balance-Sheet/Trial-Balance reports). Frontend e2e via Playwright: admin login -> sidebar contains all new nav items, Customers and Vendors created via dialog, Invoice created (qty 2 x $100 + 10% tax => live preview $220, status=sent), Mark Paid transitions to Paid, Pay Online redirects to a real Stripe checkout URL (https://checkout.stripe.com/c/pay/cs_test_...), Reports tabs all render with real numbers (P&L net $1,700; Balance Sheet balanced $1,870 = $1,870; Trial Balance debit $2,090 = credit $2,090). Previous regression suite (17/17) still passing.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/invoices/{id}/checkout", "issue": "If invoice already has a stripe_session_id, calling /checkout again creates a brand-new session (and a new payment_transactions row). Idempotency by inv-id+amount would be cleaner but not breaking."},
+      {"endpoint": "POST /api/webhook/stripe", "issue": "Webhook is registered under /api/webhook/stripe; Stripe-CLI/dashboard users typically need to point there. Verified the route exists; full signature flow only exercisable in a real webhook delivery."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Login page (preload warning)", "issues": ["Console warning '<link rel=preload> uses an unsupported `as` value' (asset-pipeline preload metadata). Non-blocking, but worth cleaning up the public/index.html preload tags."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_accounting.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_accounting.xml"
+  ],
+  "action_items": [
+    "(Optional) De-dup Stripe checkout sessions per invoice (re-use the latest open session_id instead of always creating a new one).",
+    "(Optional) Clean up unsupported <link rel=preload as=...> tags to silence the browser warning.",
+    "(Optional) Add a journal-balance live indicator data-testid on the Accounting > Journal tab (the requirement mentions data-testid='journal-balance'; the indicator is rendered visually but the testid was not detected in the DOM during the run)."
+  ],
+  "critical_code_review_comments": [
+    "accounting.py (460 lines) keeps concerns reasonable; if more domains (bills, bank rec) are added, split it into routers/accounting/{accounts,journal,invoices,reports,stripe}.py.",
+    "post_journal validates debit==credit and total>0 — good. account lookup per line is N queries; for invoice with 3 lines that's fine, but consider batch fetch if journals get large.",
+    "/api/payments/status only updates DB if status.payment_status == 'paid' — for 'expired'/'failed' sessions the invoice stays in 'sent' and the payment_transactions row stays at last known status. That is acceptable, but consider marking the txn 'expired' so users can retry cleanly.",
+    "stripe_client uses request.base_url to compute webhook_url. Behind the Emergent ingress this yields the public URL correctly, but pin via env var STRIPE_WEBHOOK_URL for stability.",
+    "Frontend Invoices.jsx polls /payments/status only 6 times (every 2s) on return; if Stripe takes >12s to settle, user sees 'Still processing — refresh shortly'. Consider exponential backoff up to ~30s.",
+    "Invoice.create with status='draft' is supported by the schema but the UI always sends status='sent'. Consider exposing a 'Save as draft' option in CreateInvoiceDialog for completeness."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_accounting.py"
+  ],
+  "success_rate": {"backend": "100% (12/12 new accounting + 17/17 regression)", "frontend": "100% on all tested flows"},
+  "test_credentials": "admin@finsight.com / admin123 (works). Stripe test card 4242 4242 4242 4242 — not auto-completed in Playwright (external hosted page), but checkout URL + session_id + payment_transactions record verified server-side, and manual mark-paid path verified e2e.",
+  "seed_data_creation": "Created fresh users TEST_acc_* and TEST_inv_* in pytest fixtures, plus admin-owned TEST_QA_Cust_* / TEST_QA_Vend_* and a new sent->paid invoice (qty 2 x $100 + 10% tax) via the UI for visual verification.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Accounting tests live at /app/backend/tests/test_accounting.py and are completely independent of the regression suite in backend_test.py (each test class uses its own fresh registered user, so re-runs are deterministic). Defaults: 17 accounts seeded per user on first GET /api/accounts; codes 1000 Cash, 1100 AR, 2100 Sales Tax Payable, 3000 Owner Equity, 4000 Sales Income are the ones used by invoice/payment journal posting. Invoice with status='sent' auto-posts AR debit / Income credit / Tax credit. mark-paid posts Cash debit / AR credit. Stripe is in test mode (sk_test_emergent) and returns cs_test_ session URLs.",
+  "rca of the issue": "No bugs found. One thing to flag: the Playwright selector get_by_role('link', name='Invoices').first.count() returned 0 even though the link is present (sidebar shown clearly in screenshot) — likely the AppLayout uses <a> rendered via a custom component without an accessible name attribute exactly matching the visible text. Subsequent .click() on the same locator did succeed and navigation worked. Consider ensuring each sidebar nav <a> has an accessible name (aria-label or matching textContent) so role=link queries are reliable for automation."
+}

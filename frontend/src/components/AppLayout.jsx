@@ -2,12 +2,16 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import {
   LayoutDashboard, Receipt, UploadCloud, Sparkles, BellRing, Settings,
-  LogOut, ShieldCheck, TrendingUp,
+  LogOut, ShieldCheck, TrendingUp, FileText, Users, BookOpen, BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const nav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testid: "nav-dashboard", end: true },
+  { to: "/invoices", label: "Invoices", icon: FileText, testid: "nav-invoices" },
+  { to: "/contacts", label: "Customers & Vendors", icon: Users, testid: "nav-contacts" },
+  { to: "/accounting", label: "Accounting", icon: BookOpen, testid: "nav-accounting" },
+  { to: "/reports", label: "Reports", icon: BarChart3, testid: "nav-reports" },
   { to: "/transactions", label: "Transactions", icon: Receipt, testid: "nav-transactions" },
   { to: "/upload", label: "Import Data", icon: UploadCloud, testid: "nav-upload" },
   { to: "/insights", label: "AI Insights", icon: Sparkles, testid: "nav-insights" },
@@ -37,7 +41,7 @@ export default function AppLayout({ children }) {
           </div>
         </div>
 
-        <nav className="flex-1 px-3 space-y-1 mt-2">
+        <nav className="flex-1 px-3 space-y-1 mt-2 overflow-y-auto">
           {nav.map((item) => (
             <NavLink
               key={item.to}

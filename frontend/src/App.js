@@ -12,6 +12,10 @@ import Upload from "@/pages/Upload";
 import Insights from "@/pages/Insights";
 import Alerts from "@/pages/Alerts";
 import Settings from "@/pages/Settings";
+import Invoices from "@/pages/Invoices";
+import Contacts from "@/pages/Contacts";
+import Accounting from "@/pages/Accounting";
+import Reports from "@/pages/Reports";
 
 const Protected = ({ children }) => (
   <ProtectedRoute>
@@ -27,6 +31,10 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<Protected><Dashboard /></Protected>} />
+            <Route path="/invoices" element={<Protected><Invoices /></Protected>} />
+            <Route path="/contacts" element={<Protected><Contacts /></Protected>} />
+            <Route path="/accounting" element={<Protected><Accounting /></Protected>} />
+            <Route path="/reports" element={<Protected><Reports /></Protected>} />
             <Route path="/transactions" element={<Protected><Transactions /></Protected>} />
             <Route path="/upload" element={<Protected><Upload /></Protected>} />
             <Route path="/insights" element={<Protected><Insights /></Protected>} />

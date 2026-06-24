@@ -668,6 +668,10 @@ async def drive_disconnect(user: dict = Depends(get_current_user)):
     return {"ok": True}
 
 
+from accounting import register_accounting_routes
+register_accounting_routes(api, db, get_current_user)
+
+
 app.include_router(api)
 
 app.add_middleware(
