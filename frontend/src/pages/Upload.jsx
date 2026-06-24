@@ -338,11 +338,14 @@ function PlaidSection() {
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mt-4" />
         ) : connected ? (
           <>
-            <p className="text-sm text-muted-foreground mt-1 mb-4">Your bank history syncs automatically.</p>
+            <p className="text-sm text-muted-foreground mt-1 mb-4">New transactions sync automatically.</p>
             <div className="w-full space-y-2 mb-4">
               {items.map((it) => (
                 <div key={it.item_id} className="flex items-center justify-between gap-2 text-sm rounded-md border border-border px-3 py-2" data-testid={`plaid-item-${it.item_id}`}>
-                  <span className="flex items-center gap-2 min-w-0"><Landmark className="h-3.5 w-3.5 text-primary shrink-0" /><span className="truncate">{it.institution_name}</span></span>
+                  <span className="flex flex-col min-w-0 text-left">
+                    <span className="flex items-center gap-2 min-w-0"><Landmark className="h-3.5 w-3.5 text-primary shrink-0" /><span className="truncate font-medium">{it.institution_name}</span></span>
+                    {it.last_synced && <span className="text-[11px] text-muted-foreground mt-0.5">Synced {new Date(it.last_synced).toLocaleString()}</span>}
+                  </span>
                   <button onClick={() => disconnectMut.mutate(it.item_id)} className="text-muted-foreground hover:text-destructive shrink-0" data-testid={`disconnect-plaid-${it.item_id}`}>
                     <Unplug className="h-3.5 w-3.5" />
                   </button>

@@ -18,6 +18,11 @@ A business finances management app with integrated encrypted local-style storage
 ## User Personas
 - SMB owner/operator who keeps books in spreadsheets and wants quick, private financial intelligence.
 
+## Implemented (2026-06-24) — Plaid Auto-Sync
+- Link tokens now register a webhook URL (`/api/plaid/webhook`). On `SYNC_UPDATES_AVAILABLE` (and INITIAL/HISTORICAL/DEFAULT_UPDATE), the item is synced automatically — no manual "Sync now".
+- Background fallback scheduler syncs all linked items every 30 min (`start_plaid_autosync`).
+- Frontend shows per-bank "Synced {time}" and an auto-sync note. Verified: synthetic webhook triggers sync and updates last_synced.
+
 ## Implemented (2026-06-24) — Plaid Bank Connection
 - **Connect bank via Plaid** (sandbox): Plaid Link on Import Data page → exchange token → auto-sync transaction history into the encrypted store, feeding dashboard + AI analysis (no manual entry).
 - Endpoints: /api/plaid/create_link_token, /exchange_public_token, /sync, /status, /disconnect/{item_id}. Access tokens Fernet-encrypted; cursor-based incremental sync with dedupe; Plaid amount sign mapped to income/expense.

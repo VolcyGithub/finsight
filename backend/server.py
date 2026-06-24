@@ -671,7 +671,7 @@ async def drive_disconnect(user: dict = Depends(get_current_user)):
 from accounting import register_accounting_routes
 register_accounting_routes(api, db, get_current_user)
 
-from plaid_service import register_plaid_routes
+from plaid_service import register_plaid_routes, start_plaid_autosync
 register_plaid_routes(api, db, get_current_user)
 
 
@@ -704,6 +704,7 @@ async def startup():
     elif not verify_password(admin_password, existing["password_hash"]):
         await db.users.update_one({"email": admin_email},
                                   {"$set": {"password_hash": hash_password(admin_password)}})
+    start_plaid_autosync(db, interval_seconds=1800)
 
 
 @app.on_event("shutdown")

@@ -16,11 +16,17 @@ from plaid.model.country_code import CountryCode
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 
-from security import encrypt_value
+from security import encrypt_value, decrypt_value
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _webhook_url() -> str:
+    base = os.environ.get("FRONTEND_URL", "").rstrip("/")
+    return f"{base}/api/plaid/webhook" if base else None
+
 
 
 _ENV_HOST = {
@@ -64,18 +70,69 @@ def _map_transaction(t) -> dict:
     }
 
 
+async def sync_item(db, uid: str, item_id: str) -> int:
+    item = await db.plaid_items.find_one({"user_id": uid, "item_id": item_id})
+    if not item:
+        return 0
+    client = _plaid_client()
+    access_token = decrypt_value(item["access_token_enc"])
+    cursor = item.get("cursor", "") or ""
+    added, removed = [], []
+    has_more = True
+    try:
+        while has_more:
+            req = TransactionsSyncRequest(access_token=access_token, cursor=cursor)
+            resp = await asyncio.to_thread(client.transactions_sync, req)
+            added.extend(resp["added"])
+            removed.extend(resp["removed"])
+            has_more = resp["has_more"]
+            cursor = resp["next_cursor"]
+    except plaid.ApiException as e:
+        raise HTTPException(status_code=400, detail=f"Plaid sync error: {e.body}")
+
+    count = 0
+    for t in added:
+        row = _map_transaction(t)
+        await db.transactions.update_one(
+            {"user_id": uid, "plaid_transaction_id": row["plaid_transaction_id"]},
+            {"$set": {
+                "id": str(uuid.uuid4()), "user_id": uid,
+                "worksheet_id": f"plaid:{item_id}",
+                "date": row["date"], "type": row["type"], "category": row["category"],
+                "amount_enc": encrypt_value(row["amount"]),
+                "description_enc": encrypt_value(row["description"]),
+                "plaid_transaction_id": row["plaid_transaction_id"],
+                "source": "plaid", "created_at": now_iso(),
+            }},
+            upsert=True,
+        )
+        count += 1
+    for r in removed:
+        await db.transactions.delete_one({"user_id": uid, "plaid_transaction_id": r["transaction_id"]})
+
+    await db.plaid_items.update_one(
+        {"user_id": uid, "item_id": item_id},
+        {"$set": {"cursor": cursor, "last_synced": now_iso()}},
+    )
+    return count
+
+
 def register_plaid_routes(api, db, get_current_user):
     @api.post("/plaid/create_link_token")
     async def create_link_token(user: dict = Depends(get_current_user)):
         client = _plaid_client()
         try:
-            req = LinkTokenCreateRequest(
+            kwargs = dict(
                 products=[Products("transactions")],
                 client_name="FinSight",
                 country_codes=[CountryCode("US")],
                 language="en",
                 user=LinkTokenCreateRequestUser(client_user_id=str(user["_id"])),
             )
+            wh = _webhook_url()
+            if wh:
+                kwargs["webhook"] = wh
+            req = LinkTokenCreateRequest(**kwargs)
             resp = await asyncio.to_thread(client.link_token_create, req)
             return {"link_token": resp["link_token"]}
         except plaid.ApiException as e:
@@ -104,55 +161,29 @@ def register_plaid_routes(api, db, get_current_user):
             }},
             upsert=True,
         )
-        synced = await _sync_item(db, uid, item_id)
+        synced = await sync_item(db, uid, item_id)
         return {"message": "Bank linked", "institution": body.institution_name, "imported": synced}
 
-    async def _sync_item(db, uid: str, item_id: str) -> int:
-        from security import decrypt_value
-        item = await db.plaid_items.find_one({"user_id": uid, "item_id": item_id})
-        if not item:
-            return 0
-        client = _plaid_client()
-        access_token = decrypt_value(item["access_token_enc"])
-        cursor = item.get("cursor", "") or ""
-        added, removed = [], []
-        has_more = True
-        try:
-            while has_more:
-                req = TransactionsSyncRequest(access_token=access_token, cursor=cursor)
-                resp = await asyncio.to_thread(client.transactions_sync, req)
-                added.extend(resp["added"])
-                removed.extend(resp["removed"])
-                has_more = resp["has_more"]
-                cursor = resp["next_cursor"]
-        except plaid.ApiException as e:
-            raise HTTPException(status_code=400, detail=f"Plaid sync error: {e.body}")
-
-        count = 0
-        for t in added:
-            row = _map_transaction(t)
-            await db.transactions.update_one(
-                {"user_id": uid, "plaid_transaction_id": row["plaid_transaction_id"]},
-                {"$set": {
-                    "id": str(uuid.uuid4()), "user_id": uid,
-                    "worksheet_id": f"plaid:{item_id}",
-                    "date": row["date"], "type": row["type"], "category": row["category"],
-                    "amount_enc": encrypt_value(row["amount"]),
-                    "description_enc": encrypt_value(row["description"]),
-                    "plaid_transaction_id": row["plaid_transaction_id"],
-                    "source": "plaid", "created_at": now_iso(),
-                }},
-                upsert=True,
-            )
-            count += 1
-        for r in removed:
-            await db.transactions.delete_one({"user_id": uid, "plaid_transaction_id": r["transaction_id"]})
-
-        await db.plaid_items.update_one(
-            {"user_id": uid, "item_id": item_id},
-            {"$set": {"cursor": cursor, "last_synced": now_iso()}},
-        )
-        return count
+    @api.post("/plaid/webhook")
+    async def plaid_webhook(payload: dict):
+        """Plaid calls this on TRANSACTIONS updates (e.g. SYNC_UPDATES_AVAILABLE)."""
+        webhook_type = payload.get("webhook_type")
+        webhook_code = payload.get("webhook_code")
+        item_id = payload.get("item_id")
+        await db.plaid_webhook_log.insert_one({
+            "webhook_type": webhook_type, "webhook_code": webhook_code,
+            "item_id": item_id, "received_at": now_iso(),
+        })
+        if webhook_type == "TRANSACTIONS" and item_id and webhook_code in {
+            "SYNC_UPDATES_AVAILABLE", "INITIAL_UPDATE", "HISTORICAL_UPDATE", "DEFAULT_UPDATE",
+        }:
+            item = await db.plaid_items.find_one({"item_id": item_id})
+            if item:
+                try:
+                    await sync_item(db, item["user_id"], item_id)
+                except Exception:
+                    pass
+        return {"acknowledged": True}
 
     @api.post("/plaid/sync")
     async def sync_all(user: dict = Depends(get_current_user)):
@@ -162,7 +193,7 @@ def register_plaid_routes(api, db, get_current_user):
             raise HTTPException(status_code=400, detail="No bank account connected.")
         total = 0
         for it in items:
-            total += await _sync_item(db, uid, it["item_id"])
+            total += await sync_item(db, uid, it["item_id"])
         return {"imported": total}
 
     @api.get("/plaid/status")
@@ -179,3 +210,23 @@ def register_plaid_routes(api, db, get_current_user):
         await db.plaid_items.delete_one({"user_id": uid, "item_id": item_id})
         await db.transactions.delete_many({"user_id": uid, "worksheet_id": f"plaid:{item_id}"})
         return {"ok": True}
+
+
+async def _autosync_loop(db, interval_seconds: int):
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            items = await db.plaid_items.find({}).to_list(1000)
+            for it in items:
+                try:
+                    await sync_item(db, it["user_id"], it["item_id"])
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+
+def start_plaid_autosync(db, interval_seconds: int = 1800):
+    """Background fallback sync (every 30 min) in addition to webhooks."""
+    asyncio.create_task(_autosync_loop(db, interval_seconds))
+
