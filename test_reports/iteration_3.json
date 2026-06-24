@@ -1,0 +1,44 @@
+{
+  "summary": "Verified end-to-end the new Plaid bank-linking integration on a fresh test user. All 7 new pytest cases pass (link_token, exchange+sync via Plaid sandbox public_token helper, status secrecy of access_token_enc, encrypted Mongo storage of plaid txns with amount_enc/description_enc/source='plaid'/worksheet_id 'plaid:{item_id}', disconnect removes item + its txns, sync-with-no-items 400). Regression suite still green (29/29 across backend_test.py + test_accounting.py). Frontend: Import Data page renders the three cards (upload-dropzone, gdrive-card, plaid-card); clicking 'Connect Bank' (data-testid=connect-bank-btn) calls /api/plaid/create_link_token (200, token starts with link-sandbox-) and the Plaid-hosted iframe opens (cdn.plaid.com modal, 'Sandbox mode' banner visible). No JS errors. Dashboard/regression flows unaffected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/plaid/sync", "issue": "Sync error path raises HTTPException(400) with raw Plaid e.body (a string). Fine for debugging but consider parsing into structured detail."},
+      {"endpoint": "GET /api/plaid/status", "issue": "Projection excludes _id, access_token_enc and cursor — good. created_at/last_synced are returned (not sensitive). Validated no secret leakage."},
+      {"endpoint": "POST /api/plaid/exchange_public_token", "issue": "Plaid SDK calls (item_public_token_exchange, transactions_sync) are synchronous inside async endpoints — works correctly under load test but blocks the event loop; consider asyncio.to_thread for production."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Upload / PlaidSection", "issues": ["Console warning 'The Plaid link-initialize.js script was embedded more than once' — caused by usePlaidLink re-initializing when linkToken state changes. Not blocking. Consider memoizing or reset to null only after open() resolves."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_plaid.py",
+    "/app/test_reports/pytest/pytest_plaid.xml"
+  ],
+  "action_items": [
+    "(Optional) Wrap Plaid SDK sync calls (item_public_token_exchange, transactions_sync) in asyncio.to_thread to avoid blocking the FastAPI event loop.",
+    "(Optional) Silence the duplicate Plaid link-initialize.js console warning by guarding linkToken state to a single initialization."
+  ],
+  "critical_code_review_comments": [
+    "plaid_service.py: _sync_item correctly uses cursor pagination + upsert dedupe on plaid_transaction_id — re-running sync is idempotent.",
+    "_map_transaction: positive Plaid amount => expense, negative => income, stored as abs() — matches Plaid contract and matches the manual transactions model.",
+    "register_plaid_routes encloses _sync_item by closure but redeclares db parameter — harmless shadowing.",
+    "Disconnect deletes only transactions where worksheet_id == f'plaid:{item_id}' — good scoping; manual & upload txns are preserved.",
+    "/api/plaid/status correctly projects out _id and access_token_enc; verified in tests that the access token field is never returned.",
+    "Frontend Upload.jsx PlaidSection: setLinkToken(null) inside onSuccess finally block could fire before usePlaidLink finishes — the duplicate-script warning surfaces because of token re-init; consider key-based remount or a single-shot token."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_plaid.py"
+  ],
+  "success_rate": {"backend": "100% (7/7 Plaid + 29/29 regression)", "frontend": "100% on tested Plaid flow (link-token call + iframe launch verified; iframe Sandbox UI completion is external/non-automatable as flagged)"},
+  "test_credentials": "admin@finsight.com / admin123. Fresh test users TEST_plaid_*@example.com auto-registered in pytest fixture. Plaid sandbox client_id/secret pulled from /app/backend/.env.",
+  "seed_data_creation": "Fresh per-test users register via /api/auth/register; the Plaid sandbox helper (POST sandbox.plaid.com/sandbox/public_token/create with institution_id ins_109508) deterministically produced ~16 transactions imported on initial exchange (the sandbox returns synchronously, so no retry loop was needed in this run). After tests the fresh user has its Plaid item disconnected; the admin user's prior Plaid linkage is left untouched.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Plaid tests at /app/backend/tests/test_plaid.py register a fresh user per module and exercise the full sandbox flow. The Plaid Link iframe is launched in-browser by the React app but the modal interactions (selecting First Platypus Bank + user_good/pass_good) cannot be reliably automated via Playwright because they live in a cross-origin cdn.plaid.com iframe. For deterministic backend testing of exchange/sync, use the sandbox public_token helper at https://sandbox.plaid.com/sandbox/public_token/create directly (no UI needed). Admin already has a prior Plaid item + invoice + sample data; spin up TEST_plaid_*@example.com fresh users for clean state. Encrypted DB fields are amount_enc/description_enc (Fernet via security.encrypt_value); plaintext 'amount'/'description' should NEVER appear in Mongo for plaid-sourced rows.",
+  "rca of the issue": "No bugs found. The single console warning 'Plaid link-initialize.js script was embedded more than once' is cosmetic and originates from the react-plaid-link hook re-initializing when setLinkToken updates while usePlaidLink is already mounted. Mitigation: render the PlaidSection's usePlaidLink only when linkToken is non-null (e.g. extract a sub-component keyed by linkToken so the hook mounts once per token)."
+}

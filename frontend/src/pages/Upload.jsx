@@ -1,6 +1,7 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { usePlaidLink } from "react-plaid-link";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   UploadCloud, FileSpreadsheet, HardDriveDownload, Sparkles, Loader2, CheckCircle2, Lock,
-  FileSpreadsheet as SheetIcon, Download, Unplug,
+  FileSpreadsheet as SheetIcon, Download, Unplug, Landmark, RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -64,7 +65,7 @@ export default function Upload() {
         </p>
       </header>
 
-      <div className="grid md:grid-cols-2 gap-6">
+      <div className="grid md:grid-cols-3 gap-6">
         <Card
           className={`p-8 border-2 border-dashed transition-colors duration-200 ${dragging ? "border-primary bg-primary/5" : "border-border"}`}
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -87,6 +88,7 @@ export default function Upload() {
         </Card>
 
         <DriveSection />
+        <PlaidSection />
       </div>
 
       <Card className="p-6 mt-6 bg-accent/5 border-accent/30" data-testid="sample-data-card">
@@ -269,5 +271,108 @@ function DriveFilesDialog({ open, onOpenChange, onImported }) {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PlaidSection() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [linkToken, setLinkToken] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const { data: status, isLoading } = useQuery({
+    queryKey: ["plaid-status"],
+    queryFn: async () => (await api.get("/plaid/status")).data,
+  });
+  const items = status?.items || [];
+  const connected = status?.connected;
+
+  const onSuccess = useCallback(async (publicToken, metadata) => {
+    setBusy(true);
+    try {
+      const res = await api.post("/plaid/exchange_public_token", {
+        public_token: publicToken,
+        institution_name: metadata?.institution?.name || "Bank",
+      });
+      toast.success(`Bank linked — imported ${res.data.imported} transactions`);
+      qc.invalidateQueries();
+      navigate("/");
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail));
+    } finally {
+      setBusy(false);
+      setLinkToken(null);
+    }
+  }, [qc, navigate]);
+
+  const { open, ready } = usePlaidLink({ token: linkToken, onSuccess });
+
+  useEffect(() => {
+    if (linkToken && ready) open();
+  }, [linkToken, ready, open]);
+
+  const startConnect = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post("/plaid/create_link_token");
+      setLinkToken(data.link_token);
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const syncMut = useMutation({
+    mutationFn: async () => (await api.post("/plaid/sync")).data,
+    onSuccess: (d) => { qc.invalidateQueries(); toast.success(`Synced ${d.imported} transactions`); },
+    onError: (e) => toast.error(formatApiErrorDetail(e.response?.data?.detail)),
+  });
+  const disconnectMut = useMutation({
+    mutationFn: async (itemId) => (await api.post(`/plaid/disconnect/${itemId}`)).data,
+    onSuccess: () => { qc.invalidateQueries(); toast.success("Bank disconnected"); },
+  });
+
+  return (
+    <Card className="p-8" data-testid="plaid-card">
+      <div className="flex flex-col items-center text-center py-6">
+        <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+          <Landmark className="h-6 w-6 text-primary" />
+        </div>
+        <h3 className="font-heading text-lg font-medium">Connect a Bank</h3>
+        {isLoading ? (
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mt-4" />
+        ) : connected ? (
+          <>
+            <p className="text-sm text-muted-foreground mt-1 mb-4">Your bank history syncs automatically.</p>
+            <div className="w-full space-y-2 mb-4">
+              {items.map((it) => (
+                <div key={it.item_id} className="flex items-center justify-between gap-2 text-sm rounded-md border border-border px-3 py-2" data-testid={`plaid-item-${it.item_id}`}>
+                  <span className="flex items-center gap-2 min-w-0"><Landmark className="h-3.5 w-3.5 text-primary shrink-0" /><span className="truncate">{it.institution_name}</span></span>
+                  <button onClick={() => disconnectMut.mutate(it.item_id)} className="text-muted-foreground hover:text-destructive shrink-0" data-testid={`disconnect-plaid-${it.item_id}`}>
+                    <Unplug className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button onClick={() => syncMut.mutate()} disabled={syncMut.isPending} className="gap-2" data-testid="plaid-sync-btn">
+                {syncMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Sync now
+              </Button>
+              <Button variant="outline" onClick={startConnect} disabled={busy} className="gap-2" data-testid="plaid-add-btn">Add another</Button>
+            </div>
+            <Badge variant="secondary" className="mt-3 font-normal flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-primary" /> Connected</Badge>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground mt-1 mb-5">Auto-import your transaction history via Plaid.</p>
+            <Button onClick={startConnect} disabled={busy} className="gap-2" data-testid="connect-bank-btn">
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />} Connect Bank
+            </Button>
+            <Badge variant="secondary" className="mt-3 font-normal">Sandbox: user_good / pass_good</Badge>
+          </>
+        )}
+      </div>
+    </Card>
   );
 }
